@@ -338,3 +338,29 @@ Das Admin-Panel ist standardmäßig durch **E-Mail, Passwort und zeitbasiertes E
 * `POST /api/admin/licenses/generate-key` – Frischen Lizenzschlüssel generieren
 * `GET /api/admin/stats` – Zähler (Gesamt, Aktiv, Wartet auf UUID, Abgelaufen)
 * `GET /api/admin/audit-logs` – Abfrage- und Zugriffsverlauf
+
+---
+
+## 📁 Verzeichnis- & Pfad-Referenz
+
+| Komponente | Pfad | Beschreibung |
+| :--- | :--- | :--- |
+| **VPS Repository-Wurzel** | `/opt/oxygen-licensing/` | Basisverzeichnis der Anwendung auf dem VPS |
+| **Lokale Dev-Kopie** | `c:\Users\ph\dev\dev\oxygen-licensing\` | Lokales Arbeitsverzeichnis auf Windows-Entwicklungsrechner |
+| **Git Remote** | `https://github.com/SgtRho/oxygen-licensing.git` | GitHub Upstream (Branch `main`) |
+| **Docker Compose** | `/opt/oxygen-licensing/compose.yaml` | Container-Definition für `oxygen-license-server` |
+| **Umgebungsvariablen** | `/opt/oxygen-licensing/.env` | Produktions-Konfiguration (Vorlage: `.env.example`) |
+| **Dockerfile** | `/opt/oxygen-licensing/Dockerfile` | Python 3.12-slim Container-Spezifikation |
+| **Python Requirements** | `/opt/oxygen-licensing/requirements.txt` | Minimaler Stack: FastAPI, Uvicorn, Pydantic, HTTPX |
+| **Backend-Kern** | `/opt/oxygen-licensing/app/main.py` | FastAPI Endpunkte (Public Verify API, Admin API & Auth) |
+| **Datenbank-Modul** | `/opt/oxygen-licensing/app/db.py` | SQLite Schema & automatischer Abgleich von `.env` |
+| **Sicherheits-Modul** | `/opt/oxygen-licensing/app/security.py` | PBKDF2 Password-Hashing, TOTP RFC 6238, HMAC-SHA256 |
+| **Pydantic-Modelle** | `/opt/oxygen-licensing/app/models.py` | Request-/Response-Schemas |
+| **Web-Template** | `/opt/oxygen-licensing/app/templates/index.html` | HTML5 Dashboard & 2FA-Setup-Maske |
+| **Frontend-Controller** | `/opt/oxygen-licensing/app/static/admin.js` | Vanilla JS Controller für Dashboard & 2FA Setup |
+| **Stylesheets** | `/opt/oxygen-licensing/app/static/app.css` | UI Theme & Responsive Layout |
+| **Offline QR-Code Lib** | `/opt/oxygen-licensing/app/static/qrious.min.js` | Lokale QR-Code Erzeugung ohne externe Drittanbieter-APIs |
+| **Persistentes Volume** | `oxygen_license_data` (`/data`) | Docker Named-Volume für langlebige Daten |
+| **SQLite-Datenbank** | `/data/licenses.db` | Tabellen: `licenses`, `admin_users`, `audit_logs`, `settings` |
+| **Nginx Konfiguration** | `/etc/nginx/sites-available/lizensierung.modernewolke.de` | Reverse-Proxy auf Port 8000 |
+| **SSL-Zertifikate** | `/etc/letsencrypt/live/lizensierung.modernewolke.de/` | Let's Encrypt HTTPS-Zertifikate |
