@@ -29,6 +29,10 @@
   const adminTotpInput = document.getElementById('adminTotp');
   const loginError = document.getElementById('loginError');
   const loginSubmitBtn = document.getElementById('loginSubmitBtn');
+  const initialSetupNotice = document.getElementById('initialSetupNotice');
+  const loginHeadTitle = document.getElementById('loginHeadTitle');
+  const loginHeadSubtitle = document.getElementById('loginHeadSubtitle');
+  const totpGroup = document.getElementById('totpGroup');
 
   // TOTP Setup Elements
   const qrCanvas = document.getElementById('qrCanvas');
@@ -118,7 +122,7 @@
     }
   }
 
-  function showLogin() {
+  async function showLogin() {
     loginSection.style.display = 'flex';
     loginCardCredentials.style.display = 'block';
     loginCardTotpSetup.style.display = 'none';
@@ -127,7 +131,34 @@
     adminPasswordInput.value = '';
     adminTotpInput.value = '';
     loginError.style.display = 'none';
-    adminEmailInput.focus();
+
+    try {
+      const status = await api('/api/admin/auth-status');
+      if (status?.needs_initial_setup) {
+        if (initialSetupNotice) initialSetupNotice.style.display = 'block';
+        if (totpGroup) totpGroup.style.display = 'none';
+        if (loginHeadTitle) loginHeadTitle.textContent = 'Administrator-Ersteinrichtung';
+        if (loginHeadSubtitle) loginHeadSubtitle.textContent = 'Melden Sie sich mit Ihren .env-Daten an, um 2FA einzurichten.';
+        loginSubmitBtn.textContent = 'Weiter zur 2FA-Einrichtung (QR-Code) →';
+        if (status.admin_email && !adminEmailInput.value) {
+          adminEmailInput.value = status.admin_email;
+        }
+      } else {
+        if (initialSetupNotice) initialSetupNotice.style.display = 'none';
+        if (totpGroup) totpGroup.style.display = 'block';
+        if (loginHeadTitle) loginHeadTitle.textContent = 'Administrator-Anmeldung';
+        if (loginHeadSubtitle) loginHeadSubtitle.textContent = 'Geben Sie Ihre Zugangsdaten und Ihren 2FA-Code ein.';
+        loginSubmitBtn.textContent = 'Anmelden';
+      }
+    } catch {
+      if (totpGroup) totpGroup.style.display = 'block';
+    }
+
+    if (adminEmailInput.value) {
+      adminPasswordInput.focus();
+    } else {
+      adminEmailInput.focus();
+    }
   }
 
   function showDashboard(email) {
@@ -149,8 +180,9 @@
     const pwd = adminPasswordInput.value;
     const totp = adminTotpInput.value.trim();
 
+    const isInitialSetup = totpGroup && totpGroup.style.display === 'none';
     loginSubmitBtn.disabled = true;
-    loginSubmitBtn.textContent = 'Anmeldung läuft …';
+    loginSubmitBtn.textContent = isInitialSetup ? 'Prüfe Zugangsdaten …' : 'Anmeldung läuft …';
 
     try {
       const res = await api('/api/admin/login', {
@@ -164,14 +196,15 @@
       });
 
       if (res.require_totp_setup) {
-        // First-time login: show TOTP Setup card
+        // First-time login: show TOTP Setup card with QR code
         pendingSetupCredentials = { email, password: pwd };
         showTotpSetup(res.totp_secret, res.otpauth_url);
         return;
       }
 
       if (res.require_totp) {
-        // User has TOTP enabled, but didn't provide code
+        // User has TOTP enabled, but didn't provide code: show input
+        if (totpGroup) totpGroup.style.display = 'block';
         adminTotpInput.focus();
         loginError.textContent = 'Bitte geben Sie den 6-stelligen Authenticator-Code (TOTP) ein.';
         loginError.style.display = 'block';
@@ -186,7 +219,7 @@
       loginError.style.display = 'block';
     } finally {
       loginSubmitBtn.disabled = false;
-      loginSubmitBtn.textContent = 'Anmelden';
+      loginSubmitBtn.textContent = isInitialSetup ? 'Weiter zur 2FA-Einrichtung (QR-Code) →' : 'Anmelden';
     }
   };
 

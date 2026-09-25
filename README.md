@@ -128,6 +128,9 @@ DATA_DIR=/data
 ADMIN_EMAIL=admin@modernewolke.de
 ADMIN_PASSWORD=IhrSuperSicheresAdminPasswortHier123!
 
+# Optional: Bei true wird der 2FA-Schlüssel zurückgesetzt (z.B. bei Handywechsel)
+RESET_ADMIN_TOTP=false
+
 # WICHTIG: Den zuvor mit 'openssl rand -hex 32' erzeugten Key eintragen!
 SIGNING_SECRET=e7b4c91a82f3...geheimer_32_byte_hex_key...
 

@@ -12,9 +12,12 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       - DATA_DIR=/data
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-geheimes-admin-passwort-aendern}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@modernewolke.de}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-modernewolke2026!}
+      - RESET_ADMIN_TOTP=${RESET_ADMIN_TOTP:-false}
       - SIGNING_SECRET=${SIGNING_SECRET:-modernewolke-oxygen-license-secret-key-32b}
-      - CORS_ORIGINS=*
+      - SESSION_EXPIRE_HOURS=${SESSION_EXPIRE_HOURS:-48}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
     volumes:
       - license_data:/data
 

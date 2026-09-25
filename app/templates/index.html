@@ -27,13 +27,18 @@
 
   <!-- Login Section -->
   <main id="loginSection" class="login-wrapper">
-    <!-- View 1: Standard Login (Email + Password + TOTP) -->
+    <!-- View 1: Standard Login / First-Time Setup -->
     <div class="login-card" id="loginCardCredentials">
       <div class="login-head">
-        <span class="login-icon">🔐</span>
-        <h2>Administrator-Anmeldung</h2>
-        <p>Geben Sie Ihre Zugangsdaten und Ihren 2FA-Code ein.</p>
+        <span class="login-icon" id="loginHeadIcon">🔐</span>
+        <h2 id="loginHeadTitle">Administrator-Anmeldung</h2>
+        <p id="loginHeadSubtitle">Geben Sie Ihre Zugangsdaten ein.</p>
       </div>
+
+      <div id="initialSetupNotice" class="alert alert-info" style="display:none;background:rgba(59,130,246,0.12);color:#93c5fd;border:1px solid rgba(59,130,246,0.35);margin-bottom:16px;font-size:13px;line-height:1.5;text-align:left;">
+        ⚡ <b>Ersteinrichtung erforderlich:</b> Bitte melden Sie sich mit den Zugangsdaten aus Ihrer <code>.env</code> an, um den <b>QR-Code für 2FA (TOTP)</b> einzurichten.
+      </div>
+
       <form id="loginForm" class="login-form">
         <div class="form-group">
           <label for="adminEmail">E-Mail-Adresse</label>
@@ -43,10 +48,10 @@
           <label for="adminPassword">Passwort</label>
           <input type="password" id="adminPassword" placeholder="••••••••" required>
         </div>
-        <div class="form-group" id="totpGroup">
+        <div class="form-group" id="totpGroup" style="display:none;">
           <label for="adminTotp">2FA Authenticator-Code (TOTP)</label>
           <input type="text" id="adminTotp" maxlength="6" inputmode="numeric" placeholder="123456" style="font-family:monospace;letter-spacing:4px;font-size:16px;text-align:center;">
-          <small class="form-hint">6-stelliger Einmalkode aus Google Authenticator, 1Password, Apple Passwörter etc. (beim ersten Login leer lassen für 2FA-Setup).</small>
+          <small class="form-hint">6-stelliger Einmalkode aus Google Authenticator, 1Password, etc.</small>
         </div>
         <div id="loginError" class="alert alert-error" style="display:none;"></div>
         <button type="submit" id="loginSubmitBtn" class="btn btn-primary btn-block">Anmelden</button>

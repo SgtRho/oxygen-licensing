@@ -256,6 +256,23 @@ async def verify_license(req: VerifyRequest, request: Request):
 # Admin Authentication (Email, Password & TOTP 2FA)
 # ============================================================
 
+@app.get("/api/admin/auth-status")
+async def get_auth_status():
+    """
+    Public status endpoint returning whether the system is in initial 2FA setup mode
+    and which admin email is currently configured.
+    """
+    with get_db() as con:
+        user = con.execute("SELECT email, totp_enabled FROM admin_users ORDER BY id ASC LIMIT 1").fetchone()
+        if not user:
+            return {"needs_initial_setup": True, "admin_email": "admin@modernewolke.de"}
+        needs_setup = int(user["totp_enabled"]) == 0
+        return {
+            "needs_initial_setup": needs_setup,
+            "admin_email": user["email"],
+        }
+
+
 @app.post("/api/admin/login", response_model=LoginResponse)
 async def admin_login(payload: LoginRequest, response: Response):
     email = payload.email.strip().lower()
@@ -267,7 +284,7 @@ async def admin_login(payload: LoginRequest, response: Response):
     if not user or not verify_password(password, user["salt"], user["password_hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"message": "Ungültige E-Mail-Adresse oder Passwort."},
+            detail={"message": "Ungültige E-Mail-Adresse oder Passwort. Bitte prüfen Sie ggf. ADMIN_EMAIL und ADMIN_PASSWORD in der .env-Datei."},
         )
 
     # If TOTP has not yet been set up/confirmed

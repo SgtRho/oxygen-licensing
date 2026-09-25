@@ -85,23 +85,53 @@ def ensure_schema(con: sqlite3.Connection) -> None:
 
 
 def seed_admin_user_if_needed(con: sqlite3.Connection) -> None:
-    """Creates the initial admin user with email and password from environment if no user exists."""
-    row = con.execute("SELECT COUNT(*) FROM admin_users").fetchone()
-    if row and row[0] > 0:
-        return
-
+    """
+    Creates or updates the initial admin user with email and password from environment.
+    If totp_enabled == 0 (still in setup), credentials from .env are automatically synced
+    to prevent lockout if the administrator changes .env before completing 2FA.
+    If RESET_ADMIN_TOTP is set, 2FA is reset and a new secret is generated.
+    """
     from app.security import generate_totp_secret, hash_password
 
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@modernewolke.de").strip().lower()
     admin_password = os.environ.get("ADMIN_PASSWORD", "modernewolke2026!").strip()
+    reset_totp = os.environ.get("RESET_ADMIN_TOTP", "false").strip().lower() in ("1", "true", "yes")
+
     now_iso = datetime.now(timezone.utc).isoformat()
     salt, pwd_hash = hash_password(admin_password)
-    totp_secret = generate_totp_secret()
 
-    con.execute(
-        """
-        INSERT INTO admin_users (email, password_hash, salt, totp_secret, totp_enabled, is_active, created_at)
-        VALUES (?, ?, ?, ?, 0, 1, ?)
-        """,
-        (admin_email, pwd_hash, salt, totp_secret, now_iso),
-    )
+    user = con.execute("SELECT * FROM admin_users ORDER BY id ASC LIMIT 1").fetchone()
+    if not user:
+        totp_secret = generate_totp_secret()
+        con.execute(
+            """
+            INSERT INTO admin_users (email, password_hash, salt, totp_secret, totp_enabled, is_active, created_at)
+            VALUES (?, ?, ?, ?, 0, 1, ?)
+            """,
+            (admin_email, pwd_hash, salt, totp_secret, now_iso),
+        )
+        return
+
+    # If 2FA reset requested via environment variable
+    if reset_totp:
+        new_secret = generate_totp_secret()
+        con.execute(
+            """
+            UPDATE admin_users
+            SET email = ?, password_hash = ?, salt = ?, totp_secret = ?, totp_enabled = 0
+            WHERE id = ?
+            """,
+            (admin_email, pwd_hash, salt, new_secret, user["id"]),
+        )
+        return
+
+    # If TOTP has not yet been confirmed, ensure email and password match .env
+    if int(user["totp_enabled"]) == 0:
+        con.execute(
+            """
+            UPDATE admin_users
+            SET email = ?, password_hash = ?, salt = ?
+            WHERE id = ?
+            """,
+            (admin_email, pwd_hash, salt, user["id"]),
+        )
