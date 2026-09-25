@@ -12,8 +12,19 @@
     'server_report_backups',
     'warehouse',
     'advanced_documents',
-    'tickets'
+    'tickets',
+    'projects'
   ];
+
+  const MODULE_LABELS = {
+    starface: 'STARFACE',
+    server_reports: 'Serverberichte',
+    server_report_backups: 'Backups',
+    warehouse: 'Lager',
+    advanced_documents: 'Erw. Belege',
+    tickets: 'Tickets',
+    projects: 'Projekte'
+  };
 
   // DOM Elements
   const loginSection = document.getElementById('loginSection');
@@ -425,7 +436,7 @@
         .filter(([k, v]) => v && k !== 'core')
         .map(([k]) => k);
       const modTags = ['<span class="tag tag-core">Core</span>']
-        .concat(activeMods.map((m) => `<span class="tag">${esc(m)}</span>`))
+        .concat(activeMods.map((m) => `<span class="tag tag-${esc(m)}">${esc(MODULE_LABELS[m] || m)}</span>`))
         .join('');
 
       const uuidHtml = lic.instance_uuid
