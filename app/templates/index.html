@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Modernewolke Lizenzserver – Oxygen Online</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22%20width=%22100%22%20height=%22100%22><text y=%22.9em%22 font-size=%2290%22>🔑</text></svg>">
+</head>
+<body>
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-brand">
+      <span class="brand-icon">☁️</span>
+      <div>
+        <h1 class="brand-title">Modernewolke License Hub</h1>
+        <span class="brand-sub">Zentraler Lizenzserver für Oxygen Online</span>
+      </div>
+    </div>
+    <div class="header-actions" id="headerActions" style="display:none;">
+      <span class="server-badge">🟢 Online</span>
+      <button id="logoutBtn" class="btn btn-ghost btn-sm">Abmelden</button>
+    </div>
+  </header>
+
+  <!-- Login Container -->
+  <main id="loginSection" class="login-wrapper">
+    <div class="login-card">
+      <div class="login-head">
+        <span class="login-icon">🔐</span>
+        <h2>Administrator-Anmeldung</h2>
+        <p>Geben Sie das Master-Passwort für den Lizenzserver ein.</p>
+      </div>
+      <form id="loginForm" class="login-form">
+        <div class="form-group">
+          <label for="adminPassword">Master-Passwort</label>
+          <input type="password" id="adminPassword" placeholder="Passwort eingeben …" required autofocus>
+        </div>
+        <div id="loginError" class="alert alert-error" style="display:none;"></div>
+        <button type="submit" id="loginSubmitBtn" class="btn btn-primary btn-block">Anmelden</button>
+      </form>
+    </div>
+  </main>
+
+  <!-- Main Dashboard Container -->
+  <main id="dashboardSection" class="dashboard-wrapper" style="display:none;">
+    <!-- Stats Cards -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <span class="stat-label">Lizenzen Gesamt</span>
+        <span class="stat-value" id="statTotal">0</span>
+      </div>
+      <div class="stat-card stat-success">
+        <span class="stat-label">Aktiv & Verbunden</span>
+        <span class="stat-value" id="statActive">0</span>
+      </div>
+      <div class="stat-card stat-warning">
+        <span class="stat-label">Wartet auf UUID</span>
+        <span class="stat-value" id="statUnassigned">0</span>
+      </div>
+      <div class="stat-card stat-danger">
+        <span class="stat-label">Abgelaufen / Inaktiv</span>
+        <span class="stat-value" id="statInactive">0</span>
+      </div>
+    </div>
+
+    <!-- Actions & Filter Bar -->
+    <div class="toolbar">
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="searchInput" placeholder="Suche nach Kunde, Lizenzschlüssel oder Instanz-UUID …">
+      </div>
+      <div class="filter-group">
+        <select id="statusFilter" class="select-input">
+          <option value="all">Alle Status</option>
+          <option value="active">Aktiv</option>
+          <option value="unassigned_uuid">Wartet auf UUID</option>
+          <option value="expired">Abgelaufen</option>
+          <option value="inactive">Deaktiviert</option>
+        </select>
+        <button id="newLicenseBtn" class="btn btn-primary">+ Neue Lizenz anlegen</button>
+      </div>
+    </div>
+
+    <!-- License Table -->
+    <div class="table-container">
+      <table class="license-table">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Kunde / Lizenznehmer</th>
+            <th>Lizenzschlüssel</th>
+            <th>Instanz-UUID</th>
+            <th>Freigeschaltete Module</th>
+            <th>Gültig bis</th>
+            <th>Zuletzt gesehen</th>
+            <th class="text-right">Aktionen</th>
+          </tr>
+        </thead>
+        <tbody id="licenseTableBody">
+          <tr>
+            <td colspan="8" class="text-center py-8">Lade Lizenzen …</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Audit Logs Section -->
+    <div class="logs-section">
+      <div class="logs-head">
+        <h3>Protokoll (Audit Log)</h3>
+        <button id="toggleLogsBtn" class="btn btn-ghost btn-sm">Verlauf einblenden</button>
+      </div>
+      <div id="logsContainer" class="logs-container" style="display:none;">
+        <table class="logs-table">
+          <thead>
+            <tr>
+              <th>Zeitpunkt</th>
+              <th>Aktion</th>
+              <th>Lizenzschlüssel</th>
+              <th>Instanz-UUID</th>
+              <th>IP-Adresse</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody id="logsTableBody">
+            <tr><td colspan="6" class="text-center py-4">Keine Protokolleinträge vorhanden.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <!-- Modal: Create / Edit License -->
+  <div id="licenseModal" class="modal-backdrop" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modalTitle">Neue Lizenz erstellen</h3>
+        <button id="modalCloseBtn" class="btn-close">&times;</button>
+      </div>
+      <form id="licenseModalForm" class="modal-body">
+        <input type="hidden" id="modalLicenseId" value="">
+
+        <div class="form-group">
+          <label for="modalCustomer">Kunde / Lizenznehmer *</label>
+          <input type="text" id="modalCustomer" placeholder="z. B. Musterfirma GmbH" required>
+        </div>
+
+        <div class="form-group">
+          <label for="modalKey">Lizenzschlüssel</label>
+          <div class="input-with-button">
+            <input type="text" id="modalKey" placeholder="OXY-XXXX-XXXX-XXXX-XXXX" style="font-family:monospace;text-transform:uppercase;">
+            <button type="button" id="modalGenKeyBtn" class="btn btn-ghost">🎲 Neu generieren</button>
+          </div>
+          <small class="form-hint">Diesen Lizenzschlüssel trägt der Kunde in seiner Oxygen-Instanz ein.</small>
+        </div>
+
+        <div class="form-group">
+          <label for="modalUuid">Instanz-UUID der Installation</label>
+          <input type="text" id="modalUuid" placeholder="z. B. 3fa85f64-5717-4562-b3fc-2c963f66afa6" style="font-family:monospace;">
+          <small class="form-hint">Die UUID, die in der Oxygen-Instanz unter "Verwaltung > Module & Lizenz" angezeigt wird. Kann auch nachträglich eingetragen werden.</small>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="modalValidUntil">Gültig bis</label>
+            <input type="date" id="modalValidUntil">
+          </div>
+          <div class="form-group checkbox-align">
+            <label class="checkbox-label">
+              <input type="checkbox" id="modalPerpetual"> Unbegrenzt gültig
+            </label>
+          </div>
+          <div class="form-group checkbox-align">
+            <label class="checkbox-label">
+              <input type="checkbox" id="modalActive" checked> Lizenz aktiv
+            </label>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Freigeschaltete Module</label>
+          <div class="modules-grid">
+            <label class="module-check">
+              <input type="checkbox" id="mod_starface" checked>
+              <div>
+                <b>STARFACE</b>
+                <small>Telefonie & UCI-Anruferkennung</small>
+              </div>
+            </label>
+            <label class="module-check">
+              <input type="checkbox" id="mod_server_reports" checked>
+              <div>
+                <b>Serverberichte</b>
+                <small>Tagesberichte & Serverüberwachung</small>
+              </div>
+            </label>
+            <label class="module-check">
+              <input type="checkbox" id="mod_server_report_backups" checked>
+              <div>
+                <b>Serverbericht Backups</b>
+                <small>Datensicherungs-Überwachung</small>
+              </div>
+            </label>
+            <label class="module-check">
+              <input type="checkbox" id="mod_warehouse" checked>
+              <div>
+                <b>Lager</b>
+                <small>Lagerplatzverwaltung & Bestände</small>
+              </div>
+            </label>
+            <label class="module-check">
+              <input type="checkbox" id="mod_advanced_documents" checked>
+              <div>
+                <b>Erweiterte Belege</b>
+                <small>Folgebelege & Zusatzfelder</small>
+              </div>
+            </label>
+            <label class="module-check">
+              <input type="checkbox" id="mod_tickets" checked>
+              <div>
+                <b>Tickets</b>
+                <small>Helpdesk & Servicetickets</small>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="modalNotes">Interne Notizen</label>
+          <textarea id="modalNotes" rows="2" placeholder="Optionale Bemerkungen, Auftragsnummer etc."></textarea>
+        </div>
+
+        <div id="modalError" class="alert alert-error" style="display:none;"></div>
+
+        <div class="modal-footer">
+          <button type="button" id="modalCancelBtn" class="btn btn-ghost">Abbrechen</button>
+          <button type="submit" id="modalSaveBtn" class="btn btn-primary">Speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/static/admin.js"></script>
+</body>
+</html>
