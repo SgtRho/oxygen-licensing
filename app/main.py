@@ -13,21 +13,29 @@ from fastapi.staticfiles import StaticFiles
 
 from app.db import get_db
 from app.models import (
+    AdminMeResponse,
+    ChangeCredentialsRequest,
     LicenseCreate,
     LicenseOut,
     LicenseUpdate,
     LoginRequest,
     LoginResponse,
+    TotpSetupConfirm,
     VerifyRequest,
     VerifyResponse,
 )
 from app.security import (
     create_session,
     generate_license_key,
+    generate_totp_secret,
+    get_otpauth_url,
+    get_session_user,
+    hash_password,
     invalidate_session,
     sign_license,
     validate_session,
-    verify_admin_password,
+    verify_password,
+    verify_totp,
 )
 
 logger = logging.getLogger("license_server")
@@ -71,18 +79,20 @@ def _get_client_ip(request: Request) -> str:
 def _require_admin(
     oxygen_lic_session: Optional[str] = Cookie(None, alias=SESSION_COOKIE_NAME),
     authorization: Optional[str] = Header(None),
-) -> None:
+) -> dict:
     token = None
     if authorization and authorization.lower().startswith("bearer "):
         token = authorization[7:].strip()
     elif oxygen_lic_session:
         token = oxygen_lic_session.strip()
 
-    if not token or not validate_session(token):
+    session_user = get_session_user(token)
+    if not session_user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"message": "Nicht autorisiert. Bitte als Administrator anmelden."},
         )
+    return session_user
 
 
 def _compute_license_status(row: dict) -> str:
@@ -243,26 +253,103 @@ async def verify_license(req: VerifyRequest, request: Request):
 
 
 # ============================================================
-# Admin Authentication Endpoints
+# Admin Authentication (Email, Password & TOTP 2FA)
 # ============================================================
 
 @app.post("/api/admin/login", response_model=LoginResponse)
 async def admin_login(payload: LoginRequest, response: Response):
-    if not verify_admin_password(payload.password):
+    email = payload.email.strip().lower()
+    password = payload.password
+
+    with get_db() as con:
+        user = con.execute("SELECT * FROM admin_users WHERE email = ? AND is_active = 1", (email,)).fetchone()
+
+    if not user or not verify_password(password, user["salt"], user["password_hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"message": "Ungültiges Administrator-Passwort."},
+            detail={"message": "Ungültige E-Mail-Adresse oder Passwort."},
         )
-    token = create_session()
+
+    # If TOTP has not yet been set up/confirmed
+    if not bool(user["totp_enabled"]):
+        otp_url = get_otpauth_url(user["totp_secret"], user["email"])
+        return LoginResponse(
+            ok=True,
+            require_totp_setup=True,
+            totp_secret=user["totp_secret"],
+            otpauth_url=otp_url,
+            email=user["email"],
+            message="Bitte richten Sie die Zwei-Faktor-Authentifizierung (TOTP) ein.",
+        )
+
+    # TOTP is enabled: check if code was supplied
+    if not payload.totp_code:
+        return LoginResponse(
+            ok=True,
+            require_totp=True,
+            email=user["email"],
+            message="Bitte geben Sie Ihren 6-stelligen Authenticator-Code ein.",
+        )
+
+    # Verify TOTP code
+    if not verify_totp(user["totp_secret"], payload.totp_code):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"message": "Der 2FA Authenticator-Code ist ungültig oder abgelaufen."},
+        )
+
+    # Successful login: create session
+    token = create_session(user["id"], user["email"])
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with get_db() as con:
+        con.execute("UPDATE admin_users SET last_login_at = ? WHERE id = ?", (now_iso, user["id"]))
+
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=token,
         httponly=True,
         samesite="lax",
-        secure=False,  # Set to True in production with HTTPS
+        secure=False,  # Browser sends cookie over HTTP/HTTPS; in production Nginx sets HTTPS
         max_age=48 * 3600,
     )
-    return LoginResponse(ok=True, token=token, message="Erfolgreich angemeldet.")
+    return LoginResponse(ok=True, token=token, email=user["email"], message="Erfolgreich angemeldet.")
+
+
+@app.post("/api/admin/confirm-totp-setup", response_model=LoginResponse)
+async def confirm_totp_setup(payload: TotpSetupConfirm, response: Response):
+    email = payload.email.strip().lower()
+    with get_db() as con:
+        user = con.execute("SELECT * FROM admin_users WHERE email = ? AND is_active = 1", (email,)).fetchone()
+
+    if not user or not verify_password(payload.password, user["salt"], user["password_hash"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"message": "Ungültige Anmeldedaten."},
+        )
+
+    if not verify_totp(user["totp_secret"], payload.totp_code):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "Der eingegebene Bestätigungscode ist ungültig. Bitte prüfen Sie die Uhrzeit auf Ihrem Smartphone."},
+        )
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with get_db() as con:
+        con.execute(
+            "UPDATE admin_users SET totp_enabled = 1, last_login_at = ? WHERE id = ?",
+            (now_iso, user["id"]),
+        )
+
+    token = create_session(user["id"], user["email"])
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=48 * 3600,
+    )
+    return LoginResponse(ok=True, token=token, email=user["email"], message="2FA erfolgreich aktiviert und angemeldet.")
 
 
 @app.post("/api/admin/logout")
@@ -275,7 +362,7 @@ async def admin_logout(
     return {"ok": True, "message": "Erfolgreich abgemeldet."}
 
 
-@app.get("/api/admin/me")
+@app.get("/api/admin/me", response_model=AdminMeResponse)
 async def admin_me(
     oxygen_lic_session: Optional[str] = Cookie(None, alias=SESSION_COOKIE_NAME),
     authorization: Optional[str] = Header(None),
@@ -286,9 +373,51 @@ async def admin_me(
     elif oxygen_lic_session:
         token = oxygen_lic_session.strip()
 
-    if not token or not validate_session(token):
-        return {"authenticated": False}
-    return {"authenticated": True}
+    session_user = get_session_user(token)
+    if not session_user:
+        return AdminMeResponse(authenticated=False)
+
+    return AdminMeResponse(
+        authenticated=True,
+        email=session_user["email"],
+        totp_enabled=True,
+    )
+
+
+@app.post("/api/admin/change-credentials")
+async def change_credentials(
+    payload: ChangeCredentialsRequest,
+    admin_session: dict = Depends(_require_admin),
+):
+    user_id = admin_session["user_id"]
+    with get_db() as con:
+        user = con.execute("SELECT * FROM admin_users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        raise HTTPException(404, detail={"message": "Benutzer nicht gefunden."})
+
+    if not verify_password(payload.current_password, user["salt"], user["password_hash"]):
+        raise HTTPException(400, detail={"message": "Das aktuelle Passwort ist nicht korrekt."})
+
+    if not verify_totp(user["totp_secret"], payload.totp_code):
+        raise HTTPException(400, detail={"message": "Der TOTP-Code ist ungültig."})
+
+    new_email = payload.new_email.strip().lower() if payload.new_email else user["email"]
+    new_hash = user["password_hash"]
+    new_salt = user["salt"]
+
+    if payload.new_password:
+        if len(payload.new_password) < 8:
+            raise HTTPException(400, detail={"message": "Das neue Passwort muss mindestens 8 Zeichen lang sein."})
+        new_salt, new_hash = hash_password(payload.new_password)
+
+    with get_db() as con:
+        con.execute(
+            "UPDATE admin_users SET email = ?, password_hash = ?, salt = ? WHERE id = ?",
+            (new_email, new_hash, new_salt, user_id),
+        )
+
+    admin_session["email"] = new_email
+    return {"ok": True, "message": "Zugangsdaten erfolgreich aktualisiert."}
 
 
 # ============================================================
@@ -299,7 +428,7 @@ async def admin_me(
 def list_licenses(
     q: Optional[str] = None,
     status_filter: Optional[str] = None,
-    _auth: None = Depends(_require_admin),
+    _auth: dict = Depends(_require_admin),
 ):
     query = "SELECT * FROM licenses ORDER BY id DESC"
     with get_db() as con:
@@ -350,7 +479,7 @@ def list_licenses(
 @app.post("/api/admin/licenses", response_model=LicenseOut)
 def create_license(
     payload: LicenseCreate,
-    _auth: None = Depends(_require_admin),
+    _auth: dict = Depends(_require_admin),
 ):
     customer = payload.customer_name.strip()
     if not customer:
@@ -364,7 +493,6 @@ def create_license(
     modules_json = json.dumps(payload.modules or {}, ensure_ascii=False)
 
     with get_db() as con:
-        # Check if key already exists
         exists = con.execute("SELECT id FROM licenses WHERE UPPER(license_key) = ?", (key,)).fetchone()
         if exists:
             raise HTTPException(400, detail={"message": f"Ein Lizenzschlüssel '{key}' existiert bereits."})
@@ -381,7 +509,7 @@ def create_license(
         new_id = cur.lastrowid
         con.execute(
             "INSERT INTO audit_logs (action, license_key, instance_uuid, ip_address, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            ("LICENSE_CREATED", key, uuid_val, "admin", f"Lizenz für {customer} erstellt", now_iso),
+            ("LICENSE_CREATED", key, uuid_val, _auth["email"], f"Lizenz für {customer} erstellt", now_iso),
         )
         row = con.execute("SELECT * FROM licenses WHERE id = ?", (new_id,)).fetchone()
 
@@ -405,7 +533,7 @@ def create_license(
 
 
 @app.get("/api/admin/licenses/{license_id}", response_model=LicenseOut)
-def get_license(license_id: int, _auth: None = Depends(_require_admin)):
+def get_license(license_id: int, _auth: dict = Depends(_require_admin)):
     with get_db() as con:
         row = con.execute("SELECT * FROM licenses WHERE id = ?", (license_id,)).fetchone()
     if not row:
@@ -433,7 +561,7 @@ def get_license(license_id: int, _auth: None = Depends(_require_admin)):
 def update_license(
     license_id: int,
     payload: LicenseUpdate,
-    _auth: None = Depends(_require_admin),
+    _auth: dict = Depends(_require_admin),
 ):
     with get_db() as con:
         row = con.execute("SELECT * FROM licenses WHERE id = ?", (license_id,)).fetchone()
@@ -466,7 +594,7 @@ def update_license(
         )
         con.execute(
             "INSERT INTO audit_logs (action, license_key, instance_uuid, ip_address, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            ("LICENSE_UPDATED", curr["license_key"], uuid_val, "admin", f"Lizenz für {customer} aktualisiert (UUID: {uuid_val})", now_iso),
+            ("LICENSE_UPDATED", curr["license_key"], uuid_val, _auth["email"], f"Lizenz für {customer} aktualisiert (UUID: {uuid_val})", now_iso),
         )
         updated = con.execute("SELECT * FROM licenses WHERE id = ?", (license_id,)).fetchone()
 
@@ -490,7 +618,7 @@ def update_license(
 
 
 @app.delete("/api/admin/licenses/{license_id}")
-def delete_license(license_id: int, _auth: None = Depends(_require_admin)):
+def delete_license(license_id: int, _auth: dict = Depends(_require_admin)):
     with get_db() as con:
         row = con.execute("SELECT * FROM licenses WHERE id = ?", (license_id,)).fetchone()
         if not row:
@@ -501,18 +629,18 @@ def delete_license(license_id: int, _auth: None = Depends(_require_admin)):
         con.execute("DELETE FROM licenses WHERE id = ?", (license_id,))
         con.execute(
             "INSERT INTO audit_logs (action, license_key, instance_uuid, ip_address, details, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            ("LICENSE_DELETED", key, "", "admin", f"Lizenz von {customer} ({key}) gelöscht", now_iso),
+            ("LICENSE_DELETED", key, "", _auth["email"], f"Lizenz von {customer} ({key}) gelöscht", now_iso),
         )
     return {"ok": True, "message": f"Lizenz '{key}' wurde gelöscht."}
 
 
 @app.post("/api/admin/licenses/generate-key")
-def generate_key_endpoint(_auth: None = Depends(_require_admin)):
+def generate_key_endpoint(_auth: dict = Depends(_require_admin)):
     return {"license_key": generate_license_key()}
 
 
 @app.get("/api/admin/stats")
-def get_stats(_auth: None = Depends(_require_admin)):
+def get_stats(_auth: dict = Depends(_require_admin)):
     with get_db() as con:
         rows = con.execute("SELECT * FROM licenses").fetchall()
 
@@ -543,7 +671,7 @@ def get_stats(_auth: None = Depends(_require_admin)):
 
 
 @app.get("/api/admin/audit-logs")
-def get_audit_logs(limit: int = 50, _auth: None = Depends(_require_admin)):
+def get_audit_logs(limit: int = 50, _auth: dict = Depends(_require_admin)):
     with get_db() as con:
         rows = con.execute(
             "SELECT * FROM audit_logs ORDER BY id DESC LIMIT ?",

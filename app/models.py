@@ -58,10 +58,36 @@ class LicenseOut(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    password: str
+    email: str = Field(..., description="Administrator E-Mail-Adresse")
+    password: str = Field(..., description="Administrator Passwort")
+    totp_code: Optional[str] = Field(None, description="6-stelliger TOTP Authenticator-Code")
 
 
 class LoginResponse(BaseModel):
     ok: bool
     token: Optional[str] = None
+    require_totp: bool = False
+    require_totp_setup: bool = False
+    totp_secret: Optional[str] = None
+    otpauth_url: Optional[str] = None
+    email: Optional[str] = None
     message: Optional[str] = None
+
+
+class TotpSetupConfirm(BaseModel):
+    email: str
+    password: str
+    totp_code: str
+
+
+class AdminMeResponse(BaseModel):
+    authenticated: bool
+    email: Optional[str] = None
+    totp_enabled: bool = False
+
+
+class ChangeCredentialsRequest(BaseModel):
+    current_password: str
+    new_email: Optional[str] = None
+    new_password: Optional[str] = None
+    totp_code: str

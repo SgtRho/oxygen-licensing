@@ -123,7 +123,9 @@ PORT=8000
 HOST=0.0.0.0
 DATA_DIR=/data
 
-# WICHTIG: Ändern Sie das Master-Passwort für den Web-Login!
+# WICHTIG: E-Mail und Master-Passwort für den ersten Login!
+# Beim ersten Login wird automatisch das 2FA/TOTP-Setup mit QR-Code angezeigt.
+ADMIN_EMAIL=admin@modernewolke.de
 ADMIN_PASSWORD=IhrSuperSicheresAdminPasswortHier123!
 
 # WICHTIG: Den zuvor mit 'openssl rand -hex 32' erzeugten Key eintragen!
@@ -243,19 +245,38 @@ docker run --rm \
 
 ---
 
-## 🖥️ Web-Verwaltungsoberfläche
+## 🖥️ Web-Verwaltungsoberfläche & Authentifizierung
 
 Rufen Sie im Browser auf:
 👉 **`https://lizensierung.modernewolke.de/`**
 
-1. **Anmeldung:** Geben Sie das in der `.env` definierte `ADMIN_PASSWORD` ein.
-2. **Neue Lizenz anlegen:**
+### Authentifizierung & 2-Faktor-Sicherheit (TOTP)
+Das Admin-Panel ist standardmäßig durch **E-Mail, Passwort und zeitbasiertes Einmalkennwort (TOTP / RFC 6238)** geschützt:
+
+1. **Erster Login (Erst-Einrichtung von 2FA):**
+   - Geben Sie Ihre `ADMIN_EMAIL` und Ihr `ADMIN_PASSWORD` aus der `.env` ein.
+   - Da 2FA noch nicht aktiviert ist, öffnet sich sofort der **2FA-Einrichtungsbildschirm**.
+   - Scannen Sie den angezeigten **QR-Code** mit Ihrer bevorzugten Authenticator-App (z. B. Google Authenticator, Microsoft Authenticator, 1Password, Bitwarden, etc.) oder kopieren Sie den geheimen Schlüssel manuell.
+   - Geben Sie den ersten **6-stelligen Code** aus Ihrer App ein, um 2FA zu bestätigen und zu aktivieren.
+   - Sie werden sofort ins Dashboard weitergeleitet.
+
+2. **Regulärer Login:**
+   - Geben Sie **E-Mail**, **Passwort** und den aktuellen **6-stelligen TOTP-Code** ein.
+
+3. **Zugangsdaten & 2FA verwalten:**
+   - Im Dashboard oben rechts über das Profil-Icon (Klick auf Ihre E-Mail-Adresse) können Sie Ihr Passwort ändern oder bei Bedarf das TOTP-Geheimnis erneuern.
+
+---
+
+### Lizenz-Workflow im Dashboard
+
+1. **Neue Lizenz anlegen:**
    - Klicken Sie auf **`+ Neue Lizenz anlegen`**.
    - Tragen Sie den Kundennamen ein (z. B. *Musterfirma GmbH*).
    - Klicken Sie auf **`🎲 Neu generieren`**, um einen Lizenzschlüssel (z. B. `OXY-ABCD-1234-EFGH-5678`) zu erzeugen.
    - Wählen Sie die freizuschaltenden Module (`starface`, `server_reports`, `warehouse`, etc.) und optional ein Ablaufdatum.
    - Die **Instanz-UUID** kann vorerst leer bleiben, wenn der Kunde die Instanz noch nicht eingerichtet hat.
-3. **Instanz verknüpfen:**
+2. **Instanz verknüpfen:**
    - Der Kunde öffnet seine Oxygen-Instanz unter **Verwaltung > Module & Lizenz** und kopiert seine **Instanz-UUID**.
    - Im Lizenzserver klicken Sie bei der Kundenlizenz auf **`⚠️ UUID eintragen`** und fügen die UUID ein.
    - Der Kunde trägt in seiner Instanz den Lizenzschlüssel ein und klickt auf **"Speichern & Prüfen"**.
@@ -301,9 +322,11 @@ Rufen Sie im Browser auf:
 ```
 
 ### Admin API
-* `POST /api/admin/login` – Login via Passwort
+* `POST /api/admin/login` – Login mit E-Mail, Passwort und optional TOTP-Code (liefert `require_totp_setup` falls Erst-Einrichtung nötig)
+* `POST /api/admin/confirm-totp-setup` – Bestätigung des 2FA-Setups mit dem ersten 6-stelligen TOTP-Code
 * `POST /api/admin/logout` – Logout
-* `GET /api/admin/me` – Sitzungsstatus
+* `GET /api/admin/me` – Sitzungsstatus & angemeldeter Benutzer
+* `POST /api/admin/change-credentials` – Passwort ändern oder neues TOTP-Secret anfordern/aktivieren
 * `GET /api/admin/licenses` – Liste aller Lizenzen
 * `POST /api/admin/licenses` – Neue Lizenz anlegen
 * `GET /api/admin/licenses/{id}` – Details einer Lizenz

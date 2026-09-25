@@ -42,6 +42,8 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .header-brand {
@@ -70,6 +72,7 @@ body {
   display: flex;
   align-items: center;
   gap: 14px;
+  flex-wrap: wrap;
 }
 
 .server-badge {
@@ -80,6 +83,16 @@ body {
   color: var(--good);
   border: 1px solid rgba(34, 197, 94, 0.3);
   font-weight: 600;
+}
+
+.user-badge {
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--panel2);
+  padding: 5px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  font-weight: 500;
 }
 
 /* Buttons */
@@ -154,7 +167,7 @@ body {
   border-radius: 14px;
   padding: 32px;
   width: 100%;
-  max-width: 400px;
+  max-width: 420px;
   box-shadow: var(--shadow);
 }
 
@@ -177,6 +190,72 @@ body {
 .login-head p {
   font-size: 13px;
   color: var(--muted);
+}
+
+/* TOTP 2FA Setup Box */
+.totp-setup-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  background: var(--panel2);
+  padding: 20px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  margin-top: 14px;
+}
+
+.qr-container {
+  background: #ffffff;
+  padding: 12px;
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.secret-display {
+  width: 100%;
+}
+
+.secret-display label {
+  font-size: 11px;
+  color: var(--muted);
+  display: block;
+  margin-bottom: 4px;
+  text-align: center;
+}
+
+.code-copy-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg);
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  gap: 8px;
+}
+
+.code-copy-box code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--accent);
+  letter-spacing: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.direct-link {
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.direct-link:hover {
+  text-decoration: underline;
 }
 
 /* Dashboard Wrapper */

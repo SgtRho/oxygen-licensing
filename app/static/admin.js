@@ -4,6 +4,7 @@
   let allLicenses = [];
   let currentFilter = 'all';
   let currentSearch = '';
+  let pendingSetupCredentials = null;
 
   const MODULE_KEYS = [
     'starface',
@@ -16,17 +17,50 @@
 
   // DOM Elements
   const loginSection = document.getElementById('loginSection');
+  const loginCardCredentials = document.getElementById('loginCardCredentials');
+  const loginCardTotpSetup = document.getElementById('loginCardTotpSetup');
   const dashboardSection = document.getElementById('dashboardSection');
   const headerActions = document.getElementById('headerActions');
+  const userEmailBadge = document.getElementById('userEmailBadge');
+
   const loginForm = document.getElementById('loginForm');
+  const adminEmailInput = document.getElementById('adminEmail');
+  const adminPasswordInput = document.getElementById('adminPassword');
+  const adminTotpInput = document.getElementById('adminTotp');
   const loginError = document.getElementById('loginError');
+  const loginSubmitBtn = document.getElementById('loginSubmitBtn');
+
+  // TOTP Setup Elements
+  const qrCanvas = document.getElementById('qrCanvas');
+  const setupSecretText = document.getElementById('setupSecretText');
+  const copySecretBtn = document.getElementById('copySecretBtn');
+  const otpauthAppLink = document.getElementById('otpauthAppLink');
+  const totpSetupForm = document.getElementById('totpSetupForm');
+  const setupTotpCode = document.getElementById('setupTotpCode');
+  const setupError = document.getElementById('setupError');
+  const cancelTotpSetupBtn = document.getElementById('cancelTotpSetupBtn');
+
+  // Account Modal Elements
+  const accountSettingsBtn = document.getElementById('accountSettingsBtn');
+  const accountModal = document.getElementById('accountModal');
+  const accountCloseBtn = document.getElementById('accountCloseBtn');
+  const accountCancelBtn = document.getElementById('accountCancelBtn');
+  const accountModalForm = document.getElementById('accountModalForm');
+  const accNewEmail = document.getElementById('accNewEmail');
+  const accNewPassword = document.getElementById('accNewPassword');
+  const accCurrentPassword = document.getElementById('accCurrentPassword');
+  const accTotpCode = document.getElementById('accTotpCode');
+  const accountError = document.getElementById('accountError');
+  const accountSuccess = document.getElementById('accountSuccess');
+
+  // Dashboard & Table Elements
   const logoutBtn = document.getElementById('logoutBtn');
   const licenseTableBody = document.getElementById('licenseTableBody');
   const searchInput = document.getElementById('searchInput');
   const statusFilter = document.getElementById('statusFilter');
   const newLicenseBtn = document.getElementById('newLicenseBtn');
 
-  // Modal Elements
+  // License Modal Elements
   const modal = document.getElementById('licenseModal');
   const modalCloseBtn = document.getElementById('modalCloseBtn');
   const modalCancelBtn = document.getElementById('modalCancelBtn');
@@ -75,7 +109,7 @@
     try {
       const me = await api('/api/admin/me');
       if (me.authenticated) {
-        showDashboard();
+        showDashboard(me.email);
       } else {
         showLogin();
       }
@@ -86,43 +120,142 @@
 
   function showLogin() {
     loginSection.style.display = 'flex';
+    loginCardCredentials.style.display = 'block';
+    loginCardTotpSetup.style.display = 'none';
     dashboardSection.style.display = 'none';
     headerActions.style.display = 'none';
-    document.getElementById('adminPassword').value = '';
-    document.getElementById('adminPassword').focus();
+    adminPasswordInput.value = '';
+    adminTotpInput.value = '';
+    loginError.style.display = 'none';
+    adminEmailInput.focus();
   }
 
-  function showDashboard() {
+  function showDashboard(email) {
     loginSection.style.display = 'none';
     dashboardSection.style.display = 'block';
     headerActions.style.display = 'flex';
+    if (email && userEmailBadge) {
+      userEmailBadge.textContent = `👤 ${email}`;
+      accNewEmail.value = email;
+    }
     loadData();
   }
 
-  // --- Login & Logout ---
+  // --- Login Form Submit ---
   loginForm.onsubmit = async (e) => {
     e.preventDefault();
     loginError.style.display = 'none';
-    const pwd = document.getElementById('adminPassword').value;
-    const btn = document.getElementById('loginSubmitBtn');
-    btn.disabled = true;
-    btn.textContent = 'Anmeldung läuft …';
+    const email = adminEmailInput.value.trim();
+    const pwd = adminPasswordInput.value;
+    const totp = adminTotpInput.value.trim();
+
+    loginSubmitBtn.disabled = true;
+    loginSubmitBtn.textContent = 'Anmeldung läuft …';
+
     try {
-      await api('/api/admin/login', {
+      const res = await api('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: pwd })
+        body: JSON.stringify({
+          email: email,
+          password: pwd,
+          totp_code: totp || null
+        })
       });
-      showDashboard();
+
+      if (res.require_totp_setup) {
+        // First-time login: show TOTP Setup card
+        pendingSetupCredentials = { email, password: pwd };
+        showTotpSetup(res.totp_secret, res.otpauth_url);
+        return;
+      }
+
+      if (res.require_totp) {
+        // User has TOTP enabled, but didn't provide code
+        adminTotpInput.focus();
+        loginError.textContent = 'Bitte geben Sie den 6-stelligen Authenticator-Code (TOTP) ein.';
+        loginError.style.display = 'block';
+        return;
+      }
+
+      if (res.ok) {
+        showDashboard(res.email || email);
+      }
     } catch (err) {
       loginError.textContent = err.message;
       loginError.style.display = 'block';
     } finally {
-      btn.disabled = false;
-      btn.textContent = 'Anmelden';
+      loginSubmitBtn.disabled = false;
+      loginSubmitBtn.textContent = 'Anmelden';
     }
   };
 
+  // --- TOTP Setup Flow ---
+  function showTotpSetup(secret, otpauthUrl) {
+    loginCardCredentials.style.display = 'none';
+    loginCardTotpSetup.style.display = 'block';
+    setupError.style.display = 'none';
+    setupTotpCode.value = '';
+
+    // Format secret with spaces for readability: e.g. JBSW Y3DP EHPK 3PXP ...
+    const formattedSecret = secret.match(/.{1,4}/g)?.join(' ') || secret;
+    setupSecretText.textContent = formattedSecret;
+    otpauthAppLink.href = otpauthUrl;
+
+    copySecretBtn.onclick = () => {
+      navigator.clipboard.writeText(secret).then(() => {
+        const orig = copySecretBtn.textContent;
+        copySecretBtn.textContent = 'Kopiert!';
+        setTimeout(() => { copySecretBtn.textContent = orig; }, 1800);
+      });
+    };
+
+    drawQRCode(qrCanvas, otpauthUrl);
+    setupTotpCode.focus();
+  }
+
+  cancelTotpSetupBtn.onclick = () => {
+    pendingSetupCredentials = null;
+    showLogin();
+  };
+
+  totpSetupForm.onsubmit = async (e) => {
+    e.preventDefault();
+    if (!pendingSetupCredentials) {
+      showLogin();
+      return;
+    }
+    setupError.style.display = 'none';
+    const code = setupTotpCode.value.trim();
+    const btn = document.getElementById('confirmTotpBtn');
+    btn.disabled = true;
+    btn.textContent = 'Prüfe …';
+
+    try {
+      const res = await api('/api/admin/confirm-totp-setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: pendingSetupCredentials.email,
+          password: pendingSetupCredentials.password,
+          totp_code: code
+        })
+      });
+
+      if (res.ok) {
+        pendingSetupCredentials = null;
+        showDashboard(res.email);
+      }
+    } catch (err) {
+      setupError.textContent = err.message;
+      setupError.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '2FA aktivieren';
+    }
+  };
+
+  // --- Logout ---
   logoutBtn.onclick = async () => {
     try {
       await api('/api/admin/logout', { method: 'POST' });
@@ -130,7 +263,59 @@
     showLogin();
   };
 
-  // --- Data Loading ---
+  // --- Account Settings Modal ---
+  accountSettingsBtn.onclick = () => {
+    accountError.style.display = 'none';
+    accountSuccess.style.display = 'none';
+    accNewPassword.value = '';
+    accCurrentPassword.value = '';
+    accTotpCode.value = '';
+    accountModal.style.display = 'flex';
+  };
+
+  accountCloseBtn.onclick = () => { accountModal.style.display = 'none'; };
+  accountCancelBtn.onclick = () => { accountModal.style.display = 'none'; };
+
+  accountModalForm.onsubmit = async (e) => {
+    e.preventDefault();
+    accountError.style.display = 'none';
+    accountSuccess.style.display = 'none';
+
+    const payload = {
+      current_password: accCurrentPassword.value,
+      new_email: accNewEmail.value.trim() || null,
+      new_password: accNewPassword.value || null,
+      totp_code: accTotpCode.value.trim()
+    };
+
+    const saveBtn = document.getElementById('accountSaveBtn');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Speichere …';
+
+    try {
+      const res = await api('/api/admin/change-credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      accountSuccess.textContent = res.message || 'Erfolgreich aktualisiert.';
+      accountSuccess.style.display = 'block';
+      if (payload.new_email) {
+        userEmailBadge.textContent = `👤 ${payload.new_email}`;
+      }
+      setTimeout(() => {
+        accountModal.style.display = 'none';
+      }, 1500);
+    } catch (err) {
+      accountError.textContent = err.message;
+      accountError.style.display = 'block';
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Änderungen speichern';
+    }
+  };
+
+  // --- Dashboard Data Loading ---
   async function loadData() {
     await Promise.all([loadStats(), loadLicenses()]);
   }
@@ -203,7 +388,6 @@
         badgeLabel = '🔴 Abgelaufen';
       }
 
-      // Modules summary
       const activeMods = Object.entries(lic.modules || {})
         .filter(([k, v]) => v && k !== 'core')
         .map(([k]) => k);
@@ -245,7 +429,6 @@
   }
 
   function bindTableEvents() {
-    // Click-to-copy
     document.querySelectorAll('.copyable').forEach((el) => {
       el.onclick = () => {
         const text = el.dataset.copy;
@@ -257,7 +440,6 @@
       };
     });
 
-    // Assign UUID quick button
     document.querySelectorAll('.assign-uuid-btn').forEach((btn) => {
       btn.onclick = () => {
         const id = Number(btn.dataset.id);
@@ -265,7 +447,6 @@
       };
     });
 
-    // Edit button
     document.querySelectorAll('.edit-btn').forEach((btn) => {
       btn.onclick = () => {
         const id = Number(btn.dataset.id);
@@ -273,7 +454,6 @@
       };
     });
 
-    // Delete button
     document.querySelectorAll('.delete-btn').forEach((btn) => {
       btn.onclick = async () => {
         const id = Number(btn.dataset.id);
@@ -305,7 +485,7 @@
     loadLicenses();
   };
 
-  // --- Modal: Create / Edit ---
+  // --- Modal: Create / Edit License ---
   newLicenseBtn.onclick = () => {
     openCreateModal();
   };
@@ -343,13 +523,11 @@
     modalNotes.value = '';
     modalError.style.display = 'none';
 
-    // Default modules: all checked
     MODULE_KEYS.forEach((k) => {
       const el = document.getElementById(`mod_${k}`);
       if (el) el.checked = true;
     });
 
-    // Pre-generate a key
     try {
       const data = await api('/api/admin/licenses/generate-key', { method: 'POST' });
       modalKey.value = data.license_key;
@@ -488,6 +666,31 @@
     } catch (err) {
       logsTableBody.innerHTML = `<tr><td colspan="6" class="text-center py-4" style="color:var(--bad)">Fehler: ${esc(err.message)}</td></tr>`;
     }
+  }
+
+  // ============================================================
+  // Offline Local QR Code Rendering (QRious)
+  // ============================================================
+  function drawQRCode(canvas, text) {
+    if (window.QRious) {
+      new window.QRious({
+        element: canvas,
+        value: text,
+        size: 180,
+        level: 'M'
+      });
+      return;
+    }
+    // Safe offline fallback
+    const ctx = canvas.getContext('2d');
+    const size = canvas.width;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, size, size);
+    ctx.fillStyle = '#0f172a';
+    ctx.font = '12px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Manuelle Eingabe', size / 2, size / 2 - 10);
+    ctx.fillText('Schlüssel kopieren', size / 2, size / 2 + 10);
   }
 
   // Initial check

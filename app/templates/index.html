@@ -19,25 +19,74 @@
     </div>
     <div class="header-actions" id="headerActions" style="display:none;">
       <span class="server-badge">🟢 Online</span>
+      <span id="userEmailBadge" class="user-badge">👤 admin@modernewolke.de</span>
+      <button id="accountSettingsBtn" class="btn btn-ghost btn-sm" title="Zugangsdaten ändern">⚙️ Profil</button>
       <button id="logoutBtn" class="btn btn-ghost btn-sm">Abmelden</button>
     </div>
   </header>
 
-  <!-- Login Container -->
+  <!-- Login Section -->
   <main id="loginSection" class="login-wrapper">
-    <div class="login-card">
+    <!-- View 1: Standard Login (Email + Password + TOTP) -->
+    <div class="login-card" id="loginCardCredentials">
       <div class="login-head">
         <span class="login-icon">🔐</span>
         <h2>Administrator-Anmeldung</h2>
-        <p>Geben Sie das Master-Passwort für den Lizenzserver ein.</p>
+        <p>Geben Sie Ihre Zugangsdaten und Ihren 2FA-Code ein.</p>
       </div>
       <form id="loginForm" class="login-form">
         <div class="form-group">
-          <label for="adminPassword">Master-Passwort</label>
-          <input type="password" id="adminPassword" placeholder="Passwort eingeben …" required autofocus>
+          <label for="adminEmail">E-Mail-Adresse</label>
+          <input type="email" id="adminEmail" placeholder="admin@modernewolke.de" required autofocus>
+        </div>
+        <div class="form-group">
+          <label for="adminPassword">Passwort</label>
+          <input type="password" id="adminPassword" placeholder="••••••••" required>
+        </div>
+        <div class="form-group" id="totpGroup">
+          <label for="adminTotp">2FA Authenticator-Code (TOTP)</label>
+          <input type="text" id="adminTotp" maxlength="6" inputmode="numeric" placeholder="123456" style="font-family:monospace;letter-spacing:4px;font-size:16px;text-align:center;">
+          <small class="form-hint">6-stelliger Einmalkode aus Google Authenticator, 1Password, Apple Passwörter etc. (beim ersten Login leer lassen für 2FA-Setup).</small>
         </div>
         <div id="loginError" class="alert alert-error" style="display:none;"></div>
         <button type="submit" id="loginSubmitBtn" class="btn btn-primary btn-block">Anmelden</button>
+      </form>
+    </div>
+
+    <!-- View 2: Initial TOTP 2FA Setup -->
+    <div class="login-card" id="loginCardTotpSetup" style="display:none;max-width:480px;">
+      <div class="login-head">
+        <span class="login-icon">📱</span>
+        <h2>2FA-Sicherheit einrichten</h2>
+        <p>Scannen Sie den QR-Code mit Ihrer Authenticator-App.</p>
+      </div>
+      <div class="totp-setup-box">
+        <div id="qrContainer" class="qr-container">
+          <!-- Canvas for pure-JS generated QR Code -->
+          <canvas id="qrCanvas" width="180" height="180"></canvas>
+        </div>
+        <div class="secret-display">
+          <label>Manueller Einrichtungs-Schlüssel:</label>
+          <div class="code-copy-box">
+            <code id="setupSecretText">--------------------------------</code>
+            <button type="button" id="copySecretBtn" class="btn btn-ghost btn-sm">Kopieren</button>
+          </div>
+          <div style="margin-top:6px;text-align:center;">
+            <a id="otpauthAppLink" href="#" class="direct-link">Direkt in Authenticator-App öffnen</a>
+          </div>
+        </div>
+      </div>
+
+      <form id="totpSetupForm" class="login-form" style="margin-top:16px;">
+        <div class="form-group">
+          <label for="setupTotpCode">6-stelligen Code aus der App bestätigen</label>
+          <input type="text" id="setupTotpCode" maxlength="6" inputmode="numeric" placeholder="123456" required style="font-family:monospace;letter-spacing:4px;font-size:18px;text-align:center;">
+        </div>
+        <div id="setupError" class="alert alert-error" style="display:none;"></div>
+        <div style="display:flex;gap:10px;margin-top:10px;">
+          <button type="button" id="cancelTotpSetupBtn" class="btn btn-ghost flex-1">Abbrechen</button>
+          <button type="submit" id="confirmTotpBtn" class="btn btn-primary flex-1">2FA aktivieren</button>
+        </div>
       </form>
     </div>
   </main>
@@ -119,7 +168,7 @@
               <th>Aktion</th>
               <th>Lizenzschlüssel</th>
               <th>Instanz-UUID</th>
-              <th>IP-Adresse</th>
+              <th>Benutzer / IP</th>
               <th>Details</th>
             </tr>
           </thead>
@@ -241,6 +290,41 @@
     </div>
   </div>
 
+  <!-- Modal: Account Settings (Change Email / Password) -->
+  <div id="accountModal" class="modal-backdrop" style="display:none;">
+    <div class="modal-card" style="max-width:480px;">
+      <div class="modal-header">
+        <h3>Administrator-Profil anpassen</h3>
+        <button id="accountCloseBtn" class="btn-close">&times;</button>
+      </div>
+      <form id="accountModalForm" class="modal-body">
+        <div class="form-group">
+          <label for="accNewEmail">E-Mail-Adresse</label>
+          <input type="email" id="accNewEmail" placeholder="admin@modernewolke.de">
+        </div>
+        <div class="form-group">
+          <label for="accNewPassword">Neues Passwort (leer lassen für keine Änderung)</label>
+          <input type="password" id="accNewPassword" placeholder="Mindestens 8 Zeichen">
+        </div>
+        <div class="form-group" style="margin-top:8px;">
+          <label for="accCurrentPassword">Aktuelles Passwort zur Bestätigung *</label>
+          <input type="password" id="accCurrentPassword" required placeholder="••••••••">
+        </div>
+        <div class="form-group">
+          <label for="accTotpCode">Aktueller 6-stelliger TOTP-Code *</label>
+          <input type="text" id="accTotpCode" maxlength="6" inputmode="numeric" placeholder="123456" required style="font-family:monospace;letter-spacing:3px;text-align:center;">
+        </div>
+        <div id="accountError" class="alert alert-error" style="display:none;"></div>
+        <div id="accountSuccess" class="alert alert-success" style="display:none;background:var(--good-bg);color:var(--good);border:1px solid rgba(34,197,94,0.3);"></div>
+        <div class="modal-footer">
+          <button type="button" id="accountCancelBtn" class="btn btn-ghost">Schließen</button>
+          <button type="submit" id="accountSaveBtn" class="btn btn-primary">Änderungen speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/static/qrious.min.js"></script>
   <script src="/static/admin.js"></script>
 </body>
 </html>

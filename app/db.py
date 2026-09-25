@@ -1,6 +1,7 @@
 import os
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "./data"))
@@ -22,6 +23,7 @@ def get_db():
     con.execute("PRAGMA busy_timeout=5000")
     try:
         ensure_schema(con)
+        seed_admin_user_if_needed(con)
         yield con
         con.commit()
     finally:
@@ -50,6 +52,20 @@ def ensure_schema(con: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_licenses_key ON licenses(license_key);
         CREATE INDEX IF NOT EXISTS idx_licenses_uuid ON licenses(instance_uuid);
 
+        CREATE TABLE IF NOT EXISTS admin_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE NOT NULL COLLATE NOCASE,
+            password_hash TEXT NOT NULL,
+            salt TEXT NOT NULL,
+            totp_secret TEXT NOT NULL,
+            totp_enabled INTEGER NOT NULL DEFAULT 0,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            last_login_at TEXT DEFAULT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_admin_users_email ON admin_users(email);
+
         CREATE TABLE IF NOT EXISTS audit_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             action TEXT NOT NULL,
@@ -65,4 +81,27 @@ def ensure_schema(con: sqlite3.Connection) -> None:
             value TEXT NOT NULL DEFAULT ''
         );
         """
+    )
+
+
+def seed_admin_user_if_needed(con: sqlite3.Connection) -> None:
+    """Creates the initial admin user with email and password from environment if no user exists."""
+    row = con.execute("SELECT COUNT(*) FROM admin_users").fetchone()
+    if row and row[0] > 0:
+        return
+
+    from app.security import generate_totp_secret, hash_password
+
+    admin_email = os.environ.get("ADMIN_EMAIL", "admin@modernewolke.de").strip().lower()
+    admin_password = os.environ.get("ADMIN_PASSWORD", "modernewolke2026!").strip()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    salt, pwd_hash = hash_password(admin_password)
+    totp_secret = generate_totp_secret()
+
+    con.execute(
+        """
+        INSERT INTO admin_users (email, password_hash, salt, totp_secret, totp_enabled, is_active, created_at)
+        VALUES (?, ?, ?, ?, 0, 1, ?)
+        """,
+        (admin_email, pwd_hash, salt, totp_secret, now_iso),
     )
