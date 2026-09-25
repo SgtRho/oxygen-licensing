@@ -2,7 +2,7 @@
 
 Zentraler, leichtgewichtiger Lizenzserver zur Verwaltung und kryptografischen Verifizierung von Lizenzen und Modulen für **Oxygen Online (SelectLine WebUI)**.
 
-Erreichbar unter: `https://lizensierung.modernewolke.de`
+Öffentliche Adresse: `https://lizensierung.modernewolke.de`
 
 ---
 
@@ -16,9 +16,9 @@ Das Lizenzmodell basiert auf einer **strikt hardware- und instanzgebundenen Paar
 |   (Kunde / On-Premise / Cloud)     |           |  (lizensierung.modernewolke.de)         |
 +------------------------------------+           +-----------------------------------------+
 |                                    |           |                                         |
-| 1. Generiert einmalige UUID        |           | 2. Lizenz wird angelegt                 |
+| 1. Generiert einmalige UUID        |           | 2. Lizenz wird im Web-UI angelegt       |
 |    beim ersten Start               |           |    - Lizenzschlüssel: OXY-XXXX-XXXX...  |
-|    (z.B. in /data/oxygen-inst-id)  |           |    - Kunde: z.B. Musterfirma GmbH       |
+|    (z. B. in /data/oxygen-inst-id) |           |    - Kunde: z. B. Musterfirma GmbH      |
 |                                    |           |    - Module: starface, tickets, ...     |
 | 3. Admin kopiert Instanz-UUID ---> | --------> | 4. Admin trägt Instanz-UUID             |
 |                                    |           |    für diese Lizenz ein                 |
@@ -45,54 +45,147 @@ Das Lizenzmodell basiert auf einer **strikt hardware- und instanzgebundenen Paar
 
 ---
 
-## 🚀 Schnelle Inbetriebnahme (Docker Compose)
+## 🚀 Einrichtung & Deployment auf einem VPS (Ubuntu / Debian)
 
-### 1. Repository klonen & Verzeichnis betreten
+Diese Anleitung führt Schritt für Schritt durch das Klonen, Konfigurieren und Starten des Lizenzservers auf einem Linux-VPS unter der Domain `lizensierung.modernewolke.de`.
+
+### 1. Voraussetzungen auf dem VPS
+Stellen Sie sicher, dass Git, Docker und das Docker Compose Plugin installiert sind:
+
 ```bash
-cd c:\Users\ph\dev\dev\oxygen-license-server
+# Paketlisten aktualisieren & Basistools installieren
+sudo apt update && sudo apt install -y git curl ufw
+
+# Docker & Docker Compose Plugin installieren (falls noch nicht vorhanden)
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER
+# Nach dem usermod einmal neu einloggen oder 'newgrp docker' ausführen
 ```
 
-### 2. Konfiguration anlegen (`.env`)
-Erstellen Sie eine `.env`-Datei basierend auf `.env.example`:
+Prüfen Sie die Installation:
+```bash
+docker --version
+docker compose version
+```
+
+Stellen Sie außerdem sicher, dass im DNS der **A-Record** für Ihre Subdomain gesetzt ist:
+* **Host:** `lizensierung` (oder `lizensierung.modernewolke.de`)
+* **Typ:** `A`
+* **Ziel:** Öffentliche IPv4-Adresse Ihres VPS
+
+---
+
+### 2. Repository auf dem VPS klonen
+
+Wir empfehlen die Ablage unter `/opt/oxygen-licensing` (oder im Home-Verzeichnis):
+
+```bash
+# Nach /opt wechseln und Repository klonen
+sudo mkdir -p /opt
+cd /opt
+
+# Per HTTPS klonen (bei privatem Repo: GitHub Token oder SSH Deploy Key verwenden)
+sudo git clone https://github.com/SgtRho/oxygen-licensing.git
+
+# Besitzer auf den aktuellen Benutzer anpassen
+sudo chown -R $USER:$USER /opt/oxygen-licensing
+cd /opt/oxygen-licensing
+```
+
+> **Tipp (Authentifizierung bei privatem GitHub-Repo):**  
+> Nutzen Sie einen GitHub Personal Access Token (PAT) als Passwort oder hinterlegen Sie den SSH-Key des VPS unter GitHub: `Settings > Deploy keys`.  
+> Klonen per SSH: `git clone git@github.com:SgtRho/oxygen-licensing.git`
+
+---
+
+### 3. Konfiguration anlegen (`.env`)
+
+Erstellen Sie Ihre Produktionskonfiguration aus der Vorlage:
+
 ```bash
 cp .env.example .env
 ```
 
-Wichtige Parameter:
-```env
-PORT=8000
-DATA_DIR=/data
-ADMIN_PASSWORD=IhrGeheimesMasterPasswort123!
-SIGNING_SECRET=EinLangerZufaelligerGeheimerSchluesselFuerHMACSignatur
-CORS_ORIGINS=*
+Generieren Sie einen sicheren Signaturschlüssel:
+```bash
+openssl rand -hex 32
 ```
 
-### 3. Container starten
+Bearbeiten Sie die `.env`-Datei:
+```bash
+nano .env
+```
+
+Passen Sie mindestens folgende Werte an:
+```env
+# Server Port (bleibt intern auf 8000, Nginx leitet darauf weiter)
+PORT=8000
+HOST=0.0.0.0
+DATA_DIR=/data
+
+# WICHTIG: Ändern Sie das Master-Passwort für den Web-Login!
+ADMIN_PASSWORD=IhrSuperSicheresAdminPasswortHier123!
+
+# WICHTIG: Den zuvor mit 'openssl rand -hex 32' erzeugten Key eintragen!
+SIGNING_SECRET=e7b4c91a82f3...geheimer_32_byte_hex_key...
+
+# Gültigkeitsdauer der Admin-Sitzung in Stunden
+SESSION_EXPIRE_HOURS=48
+
+# CORS
+CORS_ORIGINS=*
+```
+Speichern mit `Strg + O`, beenden mit `Strg + X`.
+
+---
+
+### 4. Lizenzserver per Docker starten
+
+Bauen und starten Sie den Container als Hintergrunddienst:
+
 ```bash
 docker compose up -d --build
 ```
 
-Der Server ist anschließend unter `http://localhost:8000` erreichbar.
+Status und Logs prüfen:
+```bash
+# Container-Status prüfen
+docker compose ps
+
+# Live-Logs ansehen
+docker compose logs -f
+```
+
+Der Dienst läuft nun lokal auf Port `8000`. Sie können den Healthcheck lokal testen:
+```bash
+curl http://localhost:8000/api/health
+# Ausgabe: {"status":"ok","service":"oxygen-license-server","version":"1.0.0"}
+```
 
 ---
 
-## 🌐 Bereitstellung unter `lizensierung.modernewolke.de`
+### 5. Reverse-Proxy mit Nginx & SSL (Let's Encrypt) einrichten
 
-### Nginx Reverse-Proxy Beispiel
+Damit der Lizenzserver unter `https://lizensierung.modernewolke.de` sicher per HTTPS erreichbar ist, richten Sie Nginx als Reverse Proxy ein:
+
+```bash
+# Nginx & Certbot installieren
+sudo apt install -y nginx certbot python3-certbot-nginx
+```
+
+Erstellen Sie eine Nginx-Konfigurationsdatei:
+```bash
+sudo nano /etc/nginx/sites-available/lizensierung.modernewolke.de
+```
+
+Fügen Sie folgende Konfiguration ein:
 ```nginx
 server {
     listen 80;
-    server_name lizensierung.modernewolke.de;
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
+    listen [::]:80;
     server_name lizensierung.modernewolke.de;
 
-    ssl_certificate /etc/letsencrypt/live/lizensierung.modernewolke.de/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/lizensierung.modernewolke.de/privkey.pem;
-
+    # Weiterleitung auf HTTPS erfolgt automatisch nach Certbot
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
@@ -103,36 +196,79 @@ server {
 }
 ```
 
+Aktivieren Sie die Konfiguration und laden Sie Nginx neu:
+```bash
+sudo ln -s /etc/nginx/sites-available/lizensierung.modernewolke.de /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+Rufen Sie das kostenlose SSL-Zertifikat von Let's Encrypt ab:
+```bash
+sudo certbot --nginx -d lizensierung.modernewolke.de
+```
+Certbot konfiguriert HTTPS und die automatische HTTP->HTTPS-Weiterleitung selbstständig.
+
+---
+
+### 6. Firewall konfigurieren (UFW)
+
+Geben Sie nur SSH, HTTP und HTTPS frei:
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 'Nginx Full'
+sudo ufw enable
+```
+
+---
+
+### 7. Updates & Wartung auf dem VPS
+
+Wenn Sie Änderungen am Repository pushen, aktualisieren Sie den VPS in Sekunden:
+
+```bash
+cd /opt/oxygen-licensing
+git pull
+docker compose up -d --build
+```
+> Die Lizenzen und das Audit-Log bleiben im Docker-Volume `oxygen_license_data` erhalten und gehen bei Rebuilds **nicht** verloren.
+
+#### Backup der SQLite-Datenbank erstellen:
+```bash
+docker run --rm \
+  -v oxygen_license_data:/data \
+  -v $(pwd):/backup \
+  alpine tar czf /backup/license-backup-$(date +%F).tar.gz /data
+```
+
 ---
 
 ## 🖥️ Web-Verwaltungsoberfläche
 
-Nach dem Aufruf von `https://lizensierung.modernewolke.de/` erscheint das Login-Formular:
-- **Master-Passwort:** Das in `ADMIN_PASSWORD` konfigurierte Kennwort eingeben.
+Rufen Sie im Browser auf:
+👉 **`https://lizensierung.modernewolke.de/`**
 
-### Funktionen im Dashboard:
-- **Übersicht & KPI-Cards:** Gesamtanzahl, Aktive Lizenzen, Wartet auf UUID, Abgelaufene Lizenzen.
-- **Schnellsuche & Filter:** Sofortige Filterung nach Kundenname, Schlüssel oder UUID.
-- **1-Klick-UUID-Zuweisung:** Wenn eine Lizenz noch keine UUID hat, genügt ein Klick auf `⚠️ UUID eintragen`, um die UUID aus der Kundeninstanz einzufügen.
-- **Lizenzschlüssel-Generator:** Automatische Erzeugung sicherer Schlüssel im Format `OXY-XXXX-XXXX-XXXX-XXXX`.
-- **Modul-Checkboxen:** Gezieltes Aktivieren/Deaktivieren einzelner Module:
-  - `starface` (STARFACE Telefonie & UCI)
-  - `server_reports` (Serverberichte & Sensoren)
-  - `server_report_backups` (Datensicherungs-Überwachung)
-  - `warehouse` (Lager & Bestände)
-  - `advanced_documents` (Erweiterte Belege & Folgebelege)
-  - `tickets` (Helpdesk & Servicetickets)
-- **Gültigkeitsdauer:** Befristet auf ein Datum oder unbegrenzt gültig.
-- **Audit-Log:** Vollständiges Protokoll aller Abrufe, erfolgreichen Verifizierungen und Fehlversuche.
+1. **Anmeldung:** Geben Sie das in der `.env` definierte `ADMIN_PASSWORD` ein.
+2. **Neue Lizenz anlegen:**
+   - Klicken Sie auf **`+ Neue Lizenz anlegen`**.
+   - Tragen Sie den Kundennamen ein (z. B. *Musterfirma GmbH*).
+   - Klicken Sie auf **`🎲 Neu generieren`**, um einen Lizenzschlüssel (z. B. `OXY-ABCD-1234-EFGH-5678`) zu erzeugen.
+   - Wählen Sie die freizuschaltenden Module (`starface`, `server_reports`, `warehouse`, etc.) und optional ein Ablaufdatum.
+   - Die **Instanz-UUID** kann vorerst leer bleiben, wenn der Kunde die Instanz noch nicht eingerichtet hat.
+3. **Instanz verknüpfen:**
+   - Der Kunde öffnet seine Oxygen-Instanz unter **Verwaltung > Module & Lizenz** und kopiert seine **Instanz-UUID**.
+   - Im Lizenzserver klicken Sie bei der Kundenlizenz auf **`⚠️ UUID eintragen`** und fügen die UUID ein.
+   - Der Kunde trägt in seiner Instanz den Lizenzschlüssel ein und klickt auf **"Speichern & Prüfen"**.
+   - Die Module werden sofort freigeschaltet!
 
 ---
 
-## 📡 REST-API Dokumentation
+## 📡 REST-API Endpunkte
 
-### 1. Lizenz verifizieren (Public Endpoint für Oxygen-Instanzen)
+### Public Verification (für Oxygen Online Clients)
 `POST /api/v1/license/verify`
 
-**Request Body:**
+**Request:**
 ```json
 {
   "license_key": "OXY-ABCD-1234-EFGH-5678",
@@ -141,7 +277,7 @@ Nach dem Aufruf von `https://lizensierung.modernewolke.de/` erscheint das Login-
 }
 ```
 
-**Erfolgreiche Antwort (HTTP 200):**
+**Erfolgsantwort (HTTP 200):**
 ```json
 {
   "valid": true,
@@ -164,32 +300,15 @@ Nach dem Aufruf von `https://lizensierung.modernewolke.de/` erscheint das Login-
 }
 ```
 
-**Fehlerantwort (z.B. UUID-Fehler):**
-```json
-{
-  "valid": false,
-  "code": "UUID_MISMATCH",
-  "message": "Die Instanz-UUID stimmt nicht mit der im Lizenzserver hinterlegten UUID überein.",
-  "error": "Die übergebene Instanz-UUID stimmt nicht mit der für diesen Lizenzschlüssel hinterlegten UUID überein."
-}
-```
-
-### 2. Admin API
-- `POST /api/admin/login` – Authentifizierung via Passwort
-- `POST /api/admin/logout` – Sitzung beenden
-- `GET /api/admin/me` – Status der aktuellen Admin-Sitzung
-- `GET /api/admin/licenses` – Liste aller Lizenzen (`?q=...&status_filter=...`)
-- `POST /api/admin/licenses` – Neue Lizenz anlegen
-- `GET /api/admin/licenses/{id}` – Details einer Lizenz
-- `PUT /api/admin/licenses/{id}` – Lizenz bearbeiten (z.B. UUID eintragen)
-- `DELETE /api/admin/licenses/{id}` – Lizenz löschen
-- `POST /api/admin/licenses/generate-key` – Frischen Lizenzschlüssel generieren
-- `GET /api/admin/stats` – Statistiken für das Dashboard
-- `GET /api/admin/audit-logs` – Abruf-Historie
-
----
-
-## 🗄️ Datenhaltung & Persistenz
-- Die SQLite-Datenbank liegt persistent unter `/data/licenses.db`.
-- WAL-Modus (`Write-Ahead Logging`) und Timeout-Sicherungen sind standardmäßig aktiviert.
-- Bei Docker-Betrieb wird das Volume `oxygen_license_data` verwendet, sodass Rebuilds und Updates die Daten nicht beeinträchtigen.
+### Admin API
+* `POST /api/admin/login` – Login via Passwort
+* `POST /api/admin/logout` – Logout
+* `GET /api/admin/me` – Sitzungsstatus
+* `GET /api/admin/licenses` – Liste aller Lizenzen
+* `POST /api/admin/licenses` – Neue Lizenz anlegen
+* `GET /api/admin/licenses/{id}` – Details einer Lizenz
+* `PUT /api/admin/licenses/{id}` – Lizenz bearbeiten (z. B. UUID eintragen)
+* `DELETE /api/admin/licenses/{id}` – Lizenz entfernen
+* `POST /api/admin/licenses/generate-key` – Frischen Lizenzschlüssel generieren
+* `GET /api/admin/stats` – Zähler (Gesamt, Aktiv, Wartet auf UUID, Abgelaufen)
+* `GET /api/admin/audit-logs` – Abfrage- und Zugriffsverlauf
