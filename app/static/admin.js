@@ -567,9 +567,8 @@
     modalNotes.value = '';
     modalError.style.display = 'none';
 
-    MODULE_KEYS.forEach((k) => {
-      const el = document.getElementById(`mod_${k}`);
-      if (el) el.checked = true;
+    document.querySelectorAll('.modules-grid input[type="checkbox"]').forEach((el) => {
+      el.checked = true;
     });
 
     try {
@@ -606,9 +605,9 @@
       }
 
       const mods = lic.modules || {};
-      MODULE_KEYS.forEach((k) => {
-        const el = document.getElementById(`mod_${k}`);
-        if (el) el.checked = Boolean(mods[k]);
+      document.querySelectorAll('.modules-grid input[type="checkbox"]').forEach((el) => {
+        const key = el.id.replace(/^mod_/, '');
+        el.checked = Boolean(mods[key]);
       });
 
       modal.style.display = 'flex';
@@ -634,9 +633,9 @@
     const isEdit = Boolean(id);
 
     const modules = {};
-    MODULE_KEYS.forEach((k) => {
-      const el = document.getElementById(`mod_${k}`);
-      if (el) modules[k] = el.checked;
+    document.querySelectorAll('.modules-grid input[type="checkbox"]').forEach((el) => {
+      const key = el.id.replace(/^mod_/, '');
+      if (key) modules[key] = el.checked;
     });
 
     const payload = {
